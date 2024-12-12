@@ -1,0 +1,7 @@
+# based off of refkit's refkit-directdisk.wks.in kickstart template
+# uses the image's boot directory to populate a vfat boot partition,
+# which works with EFI.
+bootloader --ptable gpt
+part /boot --source rawcopy --label msdos --fstype=vfat --active --sourceparams="file=${DEPLOY_DIR_IMAGE}/boot.img"
+part / --source rawcopy --sourceparams="file=${DEPLOY_DIR_IMAGE}/${DM_VERITY_IMAGE}-${MACHINE}.rootfs.${DM_VERITY_IMAGE_TYPE}.verity"
+part / --source rawcopy --sourceparams="file=${DEPLOY_DIR_IMAGE}/${DM_VERITY_IMAGE}-${MACHINE}.rootfs.${DM_VERITY_IMAGE_TYPE}.verity"

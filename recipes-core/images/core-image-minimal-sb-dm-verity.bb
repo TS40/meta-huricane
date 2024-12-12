@@ -1,11 +1,14 @@
-# This class brings a more generic version of the UEFI combo app from refkit to meta-intel.
-# It uses a combo file, containing kernel, initramfs and
-# command line, presented to the BIOS as UEFI application, by prepending
-# it with the efi stub obtained from systemd-boot.
+IMAGE_INSTALL = "packagegroup-core-boot ${CORE_IMAGE_EXTRA_INSTALL}"
 
-# Don't add syslinux or build an ISO
-PCBIOS:forcevariable = "0"
-NOISO:forcevariable  = "1"
+IMAGE_LINGUAS = " "
+
+LICENSE = "MIT"
+
+inherit core-image
+
+IMAGE_ROOTFS_SIZE ?= "8192"
+IMAGE_ROOTFS_EXTRA_SPACE:append = "${@bb.utils.contains("DISTRO_FEATURES", "systemd", " + 4096", "", d)}"
+
 DEPENDS += "\
     os-release \
     systemd-boot \
@@ -14,43 +17,9 @@ DEPENDS += "\
     virtual/kernel \
     python3-pefile-native\
 "
-# image-live.bbclass will default INITRD_LIVE to the image INITRD_IMAGE creates.
-# We want behavior to be consistent whether or not "live" is in IMAGE_FSTYPES, so
-# we default INITRD_LIVE to the INITRD_IMAGE as well.
-INITRD_IMAGE ?= "dm-verity-image-initramfs"
-INITRD_LIVE ?= " ${@ ('${DEPLOY_DIR_IMAGE}/' + d.getVar('INITRD_IMAGE', expand=True) + '-${MACHINE}.cpio.gz') if d.getVar('INITRD_IMAGE', True) else ''}"
-
-do_uefiapp[depends] += " \
-                         intel-microcode:do_deploy \
-                         systemd-boot:do_deploy \
-                         virtual/kernel:do_deploy \
-                       "
-
-# INITRD_IMAGE is added to INITRD_LIVE, which we use to create our initrd, so depend on it if it is set
-do_uefiapp[depends] += "${@ '${INITRD_IMAGE}:do_image_complete' if d.getVar('INITRD_IMAGE') else ''}"
-
-# The image does without traditional bootloader.
-# In its place, instead, it uses a single UEFI executable binary, which is
-# composed by:
-#   - an UEFI stub
-#     The linux kernel can generate a UEFI stub, however the one from systemd-boot can fetch
-#     the command line from a separate section of the EFI application, avoiding the need to
-#     rebuild the kernel.
-#   - the kernel
-#   - an initramfs (optional)
-
-UKIFY_CMD ?= "ukify build"
-UKI_CONFIG_FILE ?= "${UNPACKDIR}/uki.conf"
-UKI_FILENAME ?= "uki.efi"
-UKI_KERNEL_FILENAME ?= "${KERNEL_IMAGETYPE}"
-UKI_CMDLINE ?= "rootwait root=LABEL=active console=${KERNEL_CONSOLE} selinux=1 init=/bin/bash"
-# secure boot keys and cert, needs sbsign-tools-native (meta-secure-core)
-#UKI_SB_KEY ?= ""
-#UKI_SB_CERT ?= ""
-
 
 def create_uefiapp(d, uuid=None, app_suffix=''):
-    import glob, re
+    import glob, re, shutil
     import bb.process
     ukify_cmd = d.getVar('UKIFY_CMD')
     build_dir = d.getVar('B')
@@ -98,7 +67,7 @@ def create_uefiapp(d, uuid=None, app_suffix=''):
     # command line
     cmdline = d.getVar('UKI_CMDLINE')
     if cmdline:
-        ukify_cmd += " --cmdline='%s'" % (cmdline)
+        ukify_cmd += " --cmdline='rootwait root=/dev/sda2 selinux=1 '"
 
     # dtb
     if d.getVar('KERNEL_DEVICETREE'):
@@ -138,12 +107,24 @@ def create_uefiapp(d, uuid=None, app_suffix=''):
     image_link_name = d.getVar('IMAGE_LINK_NAME')
     m = re.match(r"\S*(ia32|x64)(.efi)\S*", os.path.basename(stub))
     app = "boot%s%s%s" % (m.group(1), app_suffix, m.group(2))
-    output = " --output=%s/%s.%s" % (deploy_dir_image, image_link_name, app)
+    
+    if os.path.exists("%s/boot" % (deploy_dir_image)):
+        shutil.rmtree("%s/boot" % (deploy_dir_image))
+    os.mkdir("%s/boot" % (deploy_dir_image))
+    os.mkdir("%s/boot/EFI" % (deploy_dir_image)) 
+    os.mkdir("%s/boot/EFI/BOOT" % (deploy_dir_image)) 
+    output = " --output=%s/boot/EFI/BOOT/bootx64.efi" % (deploy_dir_image)
     ukify_cmd += " %s" % (output)
 
     # Run the ukify command
     bb.debug(2, "uki: running command: %s" % (ukify_cmd))
     bb.process.run(ukify_cmd, shell=True)
+    if os.path.exists("%s/boot.img" % (deploy_dir_image)):
+        os.remove("%s/boot.img"% (deploy_dir_image)) 
+    bb.process.run("dd if=/dev/zero of=%s/boot.img bs=1M count=100"% (deploy_dir_image), shell=True)
+    bb.process.run("mkfs.vfat -n MSDOS %s/boot.img"% (deploy_dir_image), shell=True)
+    bb.process.run("mcopy -i %s/boot.img %s/boot/EFI/  ::"% (deploy_dir_image,deploy_dir_image), shell=True)
+    bb.process.run("mcopy -i %s/boot.img %s/boot/EFI/BOOT  ::EFI/"% (deploy_dir_image,deploy_dir_image), shell=True)
 
 python create_uefiapps () {
     # We must clean up anything that matches the expected output pattern, to ensure that
@@ -155,70 +136,12 @@ python create_uefiapps () {
     uuid = d.getVar('DISK_SIGNATURE_UUID')
     create_uefiapp(d, uuid=uuid)
 }
-
-# This is intentionally split into different parts. This way, derived
-# classes or images can extend the individual parts. We can also use
-# whatever language (shell script or Python) is more suitable.
-python do_uefiapp() {
+do_image_complete[depends] += "${@ '${INITRD_IMAGE}:do_image_complete' if d.getVar('INITRD_IMAGE') else ''}"
+do_image_complete[depends] += " \
+                         intel-microcode:do_deploy \
+                         systemd-boot:do_deploy \
+                         virtual/kernel:do_deploy \
+                       "
+python do_image_complete() {
     bb.build.exec_func('create_uefiapps', d)
 }
-
-do_uefiapp[vardeps] += "APPEND DISK_SIGNATURE_UUID INITRD_LIVE KERNEL_IMAGETYPE IMAGE_LINK_NAME"
-
-uefiapp_deploy_at() {
-    dest=$1
-    for i in ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.boot*.efi; do
-        target=`basename $i`
-        target=`echo $target | sed -e 's/${IMAGE_LINK_NAME}.//'`
-        cp  --preserve=timestamps -r $i $dest/$target
-    done
-}
-
-fakeroot do_uefiapp_deploy() {
-    rm -rf ${IMAGE_ROOTFS}/boot/*
-    dest=${IMAGE_ROOTFS}/boot/EFI/BOOT
-    mkdir -p $dest
-    uefiapp_deploy_at $dest
-}
-
-do_uefiapp_deploy[depends] += "${PN}:do_uefiapp virtual/fakeroot-native:do_populate_sysroot"
-
-
-# This decides when/how we add our tasks to the image
-python () {
-    image_fstypes = d.getVar('IMAGE_FSTYPES', True)
-    initramfs_fstypes = d.getVar('INITRAMFS_FSTYPES', True)
-
-    # Don't add any of these tasks to initramfs images
-    if initramfs_fstypes not in image_fstypes:
-        bb.build.addtask('uefiapp', 'do_image', 'do_rootfs', d)
-        bb.build.addtask('uefiapp_deploy', 'do_image', 'do_rootfs', d)
-}
-
-SIGN_AFTER ?= "do_uefiapp"
-SIGN_BEFORE ?= "do_uefiapp_deploy"
-SIGNING_DIR ?= "${DEPLOY_DIR_IMAGE}"
-SIGNING_BINARIES ?= "${IMAGE_LINK_NAME}.boot*.efi"
-
-
-# Legacy hddimg support below this line
-efi_hddimg_populate() {
-    uefiapp_deploy_at "$1"
-}
-
-build_efi_cfg() {
-    # The command line is built into the combo app, so this is a null op
-    :
-}
-
-populate_kernel:append() {
-    # The kernel and initrd are built into the app, so we don't need these
-    if [ -f $dest/initrd ]; then
-        rm $dest/initrd
-    fi
-    if [ -f $dest/vmlinuz ]; then
-        rm $dest/vmlinuz
-    fi
-}
-
-
