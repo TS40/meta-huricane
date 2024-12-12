@@ -1,3 +1,17 @@
+BUILDING
+=============
+
+bitbake core-image-minimal-sb-dm-verity
+
+wic create -e  core-image-minimal-sb-dm-verity generic-bootdisk-AB-dm
+
+qemu-img convert -O vmdk ./generic-bootdisk-AB-dm-202412121735-sda.direct ./generic-bootdisk-AB-dm-202412121735-sda.direct.vmdk
+
+
+
+
+
+
 This README file contains information on the contents of the meta-huricane layer.
 
 Please see the corresponding sections below for details.
