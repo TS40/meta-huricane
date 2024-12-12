@@ -1,0 +1,42 @@
+#!/bin/sh
+
+dmverity_enabled() {
+    return 0
+}
+
+dmverity_run() {
+    DATA_SIZE="__not_set__"
+    DATA_BLOCK_SIZE="__not_set__"
+    ROOT_HASH="__not_set__"
+    SEPARATE_HASH="__not_set__"
+    mount /dev/sda1 /boot
+    . /boot/dm-verity.env
+
+    C=0
+    delay=${bootparam_rootdelay:-1}
+    timeout=${bootparam_roottimeout:-5}
+
+    # we know exactly what we are looking for; don't need the wide hunt below
+
+    RDEV=""
+
+    if test -f "/boot/useA"; then
+	RDEV="$(realpath /dev/sda2 2>/dev/null)"
+    fi
+    if test -f "/boot/useB"; then
+	RDEV="$(realpath /dev/sda3 2>/dev/null)"
+    fi
+    umount /boot
+    veritysetup \
+        --data-block-size=${DATA_BLOCK_SIZE} \
+        --hash-offset=${DATA_SIZE} \
+        create rootfs \
+        ${RDEV} \
+        ${RDEV} \
+        ${ROOT_HASH}
+
+    mount \
+        -o ro \
+        /dev/mapper/rootfs \
+        ${ROOTFS_DIR} || exit 2
+}
