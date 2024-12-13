@@ -67,7 +67,7 @@ def create_uefiapp(d, uuid=None, app_suffix=''):
     # command line
     cmdline = d.getVar('UKI_CMDLINE')
     if cmdline:
-        ukify_cmd += " --cmdline='rootwait root=/dev/sda2 selinux=1 '"
+        ukify_cmd += " --cmdline='rootwait root=/dev/sda1 selinux=1 '"
 
     # dtb
     if d.getVar('KERNEL_DEVICETREE'):
@@ -115,6 +115,7 @@ def create_uefiapp(d, uuid=None, app_suffix=''):
     os.mkdir("%s/boot/EFI/BOOT" % (deploy_dir_image)) 
     bb.process.run("touch %s/boot/useA"% (deploy_dir_image),shell=True)
     bb.process.run("cp %s/work-shared/%s/dm-verity/%s.ext4.verity.env %s/boot/dm-verity.env"% (d.getVar('TMPDIR'),d.getVar('MACHINE'),d.getVar('IMAGE_BASENAME'),deploy_dir_image),shell=True)
+    bb.process.run("openssl dgst -sha256 -sign %s -out %s/boot/dm-verity.env.sig %s/boot/dm-verity.env"% (d.getVar('SECURE_BOOT_SIGNING_KEY'),deploy_dir_image,deploy_dir_image),shell=True)
     output = " --output=%s/boot/EFI/BOOT/bootx64.efi" % (deploy_dir_image)
     ukify_cmd += " %s" % (output)
 
@@ -127,6 +128,7 @@ def create_uefiapp(d, uuid=None, app_suffix=''):
     bb.process.run("mkfs.vfat -n MSDOS %s/boot.img"% (deploy_dir_image), shell=True)
     bb.process.run("mcopy -i %s/boot.img %s/boot/EFI/  ::"% (deploy_dir_image,deploy_dir_image), shell=True)
     bb.process.run("mcopy -i %s/boot.img %s/boot/useA  ::"% (deploy_dir_image,deploy_dir_image), shell=True)
+    bb.process.run("mcopy -i %s/boot.img %s/boot/dm-verity.env.sig  ::"% (deploy_dir_image,deploy_dir_image), shell=True)
     bb.process.run("mcopy -i %s/boot.img %s/boot/dm-verity.env  ::"% (deploy_dir_image,deploy_dir_image), shell=True)
     bb.process.run("mcopy -i %s/boot.img %s/boot/EFI/BOOT  ::EFI/"% (deploy_dir_image,deploy_dir_image), shell=True)
 

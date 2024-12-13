@@ -10,6 +10,12 @@ dmverity_run() {
     ROOT_HASH="__not_set__"
     SEPARATE_HASH="__not_set__"
     mount /dev/sda1 /boot
+    /verify
+    retVal=$?
+if [ $retVal -ne 0 ]; then
+    return
+fi
+
     . /boot/dm-verity.env
 
     C=0
